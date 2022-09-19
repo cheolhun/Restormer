@@ -88,8 +88,11 @@ class FeedForward(nn.Module):
     def forward(self, x):
         x = self.project_in(x)
         x1, x2 = self.dwconv(x).chunk(2, dim=1)
-        x = F.gelu(x1) * x2
-        x = self.project_out(x)
+
+        #x = F.gelu(x1) * x2
+        #x = self.project_out(x)
+        x2 *= F.gelu(x1)
+        x = self.project_out(x2)
         return x
 
 
@@ -144,8 +147,10 @@ class TransformerBlock(nn.Module):
         self.ffn = FeedForward(dim, ffn_expansion_factor, bias)
 
     def forward(self, x):
-        x = x + self.attn(self.norm1(x))
-        x = x + self.ffn(self.norm2(x))
+        #x = x + self.attn(self.norm1(x))
+        #x = x + self.ffn(self.norm2(x))
+        x += self.attn(self.norm1(x))
+        x += self.ffn(self.norm2(x))
 
         return x
 
@@ -243,32 +248,47 @@ class Restormer(nn.Module):
         self.output = nn.Conv2d(int(dim*2**1), out_channels, kernel_size=3, stride=1, padding=1, bias=bias)
 
     def forward(self, inp_img):
-
         inp_enc_level1 = self.patch_embed(inp_img)
         out_enc_level1 = self.encoder_level1(inp_enc_level1)
+        del inp_enc_level1
+        torch.cuda.empty_cache()
         
         inp_enc_level2 = self.down1_2(out_enc_level1)
         out_enc_level2 = self.encoder_level2(inp_enc_level2)
+        del inp_enc_level2
+        torch.cuda.empty_cache()
 
         inp_enc_level3 = self.down2_3(out_enc_level2)
         out_enc_level3 = self.encoder_level3(inp_enc_level3) 
+        del inp_enc_level3
+        torch.cuda.empty_cache()
 
         inp_enc_level4 = self.down3_4(out_enc_level3)        
         latent = self.latent(inp_enc_level4) 
+        del inp_enc_level4
+        torch.cuda.empty_cache()
                         
         inp_dec_level3 = self.up4_3(latent)
         inp_dec_level3 = torch.cat([inp_dec_level3, out_enc_level3], 1)
         inp_dec_level3 = self.reduce_chan_level3(inp_dec_level3)
         out_dec_level3 = self.decoder_level3(inp_dec_level3) 
+        del inp_dec_level3
+        torch.cuda.empty_cache()
 
         inp_dec_level2 = self.up3_2(out_dec_level3)
         inp_dec_level2 = torch.cat([inp_dec_level2, out_enc_level2], 1)
         inp_dec_level2 = self.reduce_chan_level2(inp_dec_level2)
         out_dec_level2 = self.decoder_level2(inp_dec_level2) 
+        del inp_dec_level2
+        del out_dec_level3
+        torch.cuda.empty_cache()
 
         inp_dec_level1 = self.up2_1(out_dec_level2)
         inp_dec_level1 = torch.cat([inp_dec_level1, out_enc_level1], 1)
         out_dec_level1 = self.decoder_level1(inp_dec_level1)
+        del inp_dec_level1
+        del out_dec_level2
+        torch.cuda.empty_cache()
         
         out_dec_level1 = self.refinement(out_dec_level1)
 
@@ -279,7 +299,6 @@ class Restormer(nn.Module):
         ###########################
         else:
             out_dec_level1 = self.output(out_dec_level1) + inp_img
-
 
         return out_dec_level1
 
